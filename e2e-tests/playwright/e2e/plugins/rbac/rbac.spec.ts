@@ -15,6 +15,7 @@ import RhdhRbacApi from "../../../support/api/rbac-api";
 import { RbacConstants } from "../../../data/rbac-constants";
 import { Policy } from "../../../support/api/rbac-api-structures";
 import { CatalogImport } from "../../../support/pages/catalog-import";
+import { HelmActions } from "../../../utils/helm";
 
 /*
     Note that:
@@ -88,7 +89,7 @@ test.describe.serial("Test RBAC", () => {
   });
 
   test.describe
-    .serial("Test RBAC plugin: Aliases used in conditional access policies", () => {
+    .serial("Test RBAC plugin: $currentUser alias used in conditional access policies", () => {
     test.beforeEach(async ({ page }) => {
       await new Common(page).loginAsKeycloakUser(
         process.env.GH_USER2_ID,
@@ -128,6 +129,51 @@ test.describe.serial("Test RBAC", () => {
       await page.getByTestId("menu-button").click();
       const unregisterGroupOwned = page.getByText("Unregister entity");
       await expect(unregisterGroupOwned).toBeDisabled();
+    });
+  });
+
+  test.describe
+    .serial("Test RBAC plugin: $ownerRefs alias used in conditional access policies", () => {
+    test.beforeEach(async ({ page }) => {
+      await new Common(page).loginAsKeycloakUser(
+        process.env.QE_USER3_ID,
+        process.env.QE_USER3_PASS,
+      );
+    });
+
+    test("Check if $ownerRefs alias used in conditions with includeTransitiveGroupOwnership: the user is allowed to unregister component owned by transitive parent group.", async ({
+      page,
+    }) => {
+      await HelmActions.upgradeHelmChartWithWait(
+        process.env.RELEASE_NAME_RBAC,
+        process.env.HELM_REPO_NAME,
+        process.env.NAME_SPACE_RBAC,
+        process.env.HELM_CHART_RBAC_VALUE_FILE_NAME,
+        process.env.CHART_VERSION,
+        process.env.QUAY_REPO,
+        process.env.TAG_NAME,
+        [
+          "--set upstream.backstage.appConfig.includeTransitiveGroupOwnership=true",
+        ],
+      );
+
+      const uiHelper = new UIhelper(page);
+      const testParentGroup = "group:default/rhdh-qe-parent-team";
+      await page.goto("/catalog");
+      await uiHelper.selectMuiBox("Kind", "Component");
+
+      await uiHelper.searchInputPlaceholder("mock-site");
+      await page.getByRole("link", { name: "mock-site" }).click();
+      await expect(page.locator("header")).toContainText(testParentGroup);
+      await page.getByTestId("menu-button").click();
+      const unregisterUserOwned = page.getByText("Unregister entity");
+      await expect(unregisterUserOwned).toBeEnabled();
+
+      await page.getByText("Unregister entity").click();
+      await expect(page.getByRole("heading")).toContainText(
+        "Are you sure you want to unregister this entity?",
+      );
+      await page.getByRole("button", { name: "Cancel" }).click();
     });
   });
 
